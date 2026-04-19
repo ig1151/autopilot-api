@@ -5,6 +5,11 @@ import { logger } from './logger';
 import { DecisionRecord } from './types';
 
 const STRATEGY_API = 'https://strategy-execution-api.onrender.com';
+const INTERVAL_MS = 5 * 60 * 1000;
+
+function getNextRun(): string {
+  return new Date(Date.now() + INTERVAL_MS).toISOString();
+}
 
 async function runSession(sessionId: string): Promise<void> {
   const session = store.get(sessionId);
@@ -24,6 +29,7 @@ async function runSession(sessionId: string): Promise<void> {
 
     const result = res.data;
     const isActionable = result.actions?.some((a: { action: string }) => a.action !== 'hold');
+    const event: DecisionRecord['event'] = isActionable ? 'decision.triggered' : 'decision.hold';
     let webhookSent = false;
 
     if (session.webhook_url && (isActionable || session.alert_on_hold)) {
@@ -31,6 +37,7 @@ async function runSession(sessionId: string): Promise<void> {
         await axios.post(
           session.webhook_url,
           {
+            event,
             autopilot_id: session.id,
             strategy: result.strategy,
             decision: result.decision,
@@ -48,6 +55,7 @@ async function runSession(sessionId: string): Promise<void> {
     }
 
     const record: DecisionRecord = {
+      event,
       timestamp: new Date().toISOString(),
       decision: result.decision,
       confidence: result.confidence,
@@ -59,26 +67,27 @@ async function runSession(sessionId: string): Promise<void> {
     store.addHistory(sessionId, record);
     store.update(sessionId, {
       last_run: new Date().toISOString(),
+      next_run: getNextRun(),
       last_decision: result.decision,
       last_confidence: result.confidence,
       run_count: (session.run_count ?? 0) + 1,
     });
 
-    logger.info({ sessionId, decision: result.decision, confidence: result.confidence, webhookSent }, 'Autopilot run complete');
+    logger.info({ sessionId, event, decision: result.decision, confidence: result.confidence, webhookSent }, 'Autopilot run complete');
   } catch (err) {
     logger.error({ sessionId, err }, 'Autopilot run failed');
   }
 }
 
 export function startScheduler(): void {
-  // Run every 5 minutes
   cron.schedule('*/5 * * * *', async () => {
     const sessions = store.getAll().filter(s => s.status === 'active');
     if (sessions.length === 0) return;
-
     logger.info({ count: sessions.length }, 'Scheduler tick — running active sessions');
     await Promise.allSettled(sessions.map(s => runSession(s.id)));
   });
 
   logger.info({}, 'Autopilot scheduler started — runs every 5 minutes');
 }
+
+export { getNextRun };

@@ -18,6 +18,7 @@ export interface AutopilotSession {
   status: SessionStatus;
   created_at: string;
   last_run?: string;
+  next_run?: string;
   last_decision?: string;
   last_confidence?: number;
   run_count: number;
@@ -25,6 +26,7 @@ export interface AutopilotSession {
 }
 
 export interface DecisionRecord {
+  event: 'decision.triggered' | 'decision.hold';
   timestamp: string;
   decision: string;
   confidence: number;
